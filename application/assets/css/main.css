@@ -74,24 +74,8 @@ body {
   overflow: scroll;
 }
 
-video {
-  min-height: 100vh;
-  min-width: 100vw;
-}
-
 small {
   font-size: 1rem;
-}
-
-#app {
-  position: relative;
-  height: 100%;
-  width: 100%;
-  background: black;
-  background-image: radial-gradient(circle, #e2dddd 10%, transparent 11%);
-  background-size: 5px 5px;
-  overflow-y: scroll;
-  overflow-x: hidden;
 }
 
 #wrapper {
@@ -122,6 +106,36 @@ article img {
 
 #chat {
   padding: 40px 0px 50px 0px;
+}
+
+.row:has(#chat) #sidebar,
+.row:has(#chat) #toolbar {
+  display: block;
+}
+
+#sidebar {
+  height: calc(100vh - 120px);
+  background: #e2dddd;
+  margin-top: 60px;
+  margin-right: 5px;
+  display: none;
+  overflow-y: scroll;
+}
+
+#toolbar {
+  height: calc(100vh - 115px);
+  margin-top: 60px;
+  margin-right: 5px;
+  display: none;
+  text-align: left;
+  padding-left: 15px;
+  overflow-y: scroll;
+}
+
+#toolbar img {
+  display: block;
+  width: 40px;
+  cursor: pointer;
 }
 
 img[src=""] {
@@ -170,6 +184,7 @@ button {
   touch-action: none;
   overflow: hidden;
 }
+
 button:focus {
   background: orange;
   border: 2px solid orange;
@@ -206,6 +221,7 @@ button.audioplayer-button img {
   0% {
     transform: translateX(0%);
   }
+
   100% {
     transform: translateX(-100%);
   }
@@ -227,6 +243,10 @@ button.audioplayer-button img {
   margin: 0 0 25px 0 !important;
   position: relative;
   min-width: 100%;
+  background: none;
+
+  touch-action: pan-y;
+  will-change: transform;
 }
 
 #addressbook button.addressbook-item img {
@@ -244,18 +264,6 @@ button.audioplayer-button img {
 
 #addressbook button.addressbook-item .inner {
   padding: 0 0 0px 10px !important;
-}
-
-#addressbook button.addressbook-item:hover {
-  background: rgba(45, 100, 208, 0) !important;
-}
-
-#addressbook button.addressbook-item:focus {
-  background: none;
-}
-
-#addressbook button.addressbook-item:focus .inner {
-  background: none;
 }
 
 #addressbook button.addressbook-item .last-conversation-message {
@@ -302,20 +310,78 @@ button.audioplayer-button img {
   background: red;
 }
 
+#addressbook button[data-activ="true"] {
+  color: red !important;
+}
+
 #addressbook button.addressbook-item small {
   color: gray;
 }
 
-#addressbook button.addressbook-item.swipe-left {
-  transform: translateX(20%);
+#addressbook button.addressbook-item.left-right {
+  transform: translateX(-5%);
 }
 
-#addressbook button.addressbook-item.swipe-right {
-  transform: translateX(-20%);
+#addressbook button.addressbook-item.swipe-left .last-conversation-message {
+  display: none;
+}
+
+#addressbook button.addressbook-item.swipe-left .last-conversation-date {
+  display: none;
+}
+
+#addressbook .item:hover {
+  cursor: pointer;
+}
+
+#addressbook button:hover {
+  cursor: pointer;
+  color: red;
+}
+
+.action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+
+  flex-shrink: 0;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.3s ease;
+  height: 60px;
+  width: fit-content;
+  margin: -20px 0 0 30px;
+}
+
+button.addressbook-item.swipe-left .action-buttons {
+  transform: scaleX(1);
+  min-width: 150px;
+  height: 40px;
+}
+
+.action-buttons span {
+  width: 50px;
+  height: 50px;
+
+  position: relative;
+}
+
+.action-buttons img {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  position: relative;
 }
 
 #addressbook button.addressbook-item:last-child {
   margin-bottom: 0px;
+}
+
+#sidebar .addressbook-box {
+  margin: 0vh 0 0 0;
+  padding: 20 0 60px 0;
+  min-width: 100%;
 }
 
 a.button-style {
@@ -332,6 +398,7 @@ a.button-style {
   display: block;
   text-align: center;
 }
+
 a.button-style:focus {
   background: orange;
   border: 0px solid gray;
@@ -398,7 +465,8 @@ label {
   top: 10px;
   bottom: 20px;
   width: 100%;
-  height: 100%; /* Responsive height */
+  height: 100%;
+  /* Responsive height */
   pointer-events: none;
   z-index: 400000;
 }
@@ -486,6 +554,7 @@ div#intro img {
   0% {
     filter: hue-rotate(-0.25turn);
   }
+
   20% {
     filter: hue-rotate(-2.25turn);
   }
@@ -508,6 +577,7 @@ div#intro img {
     display: block;
     opacity: 100;
   }
+
   to {
     display: none;
     opacity: 0;
@@ -529,28 +599,6 @@ div#intro img {
 
 canvas {
   min-width: 100%;
-}
-
-@keyframes up-and-down {
-  10% {
-    height: 30%;
-  }
-
-  30% {
-    height: 100%;
-  }
-
-  60% {
-    height: 50%;
-  }
-
-  80% {
-    height: 75%;
-  }
-
-  100% {
-    height: 60%;
-  }
 }
 
 #KaiOSAd {
@@ -621,6 +669,7 @@ div#side-toast img {
 div.nickname {
   font-weight: bold;
 }
+
 /*/ //////////////////////////
 ///VIEWS////////////////*/
 
@@ -642,7 +691,8 @@ div#map-container {
   width: 20px;
   height: 20px;
   transform: translate(-50%, -50%);
-  pointer-events: none; /* damit Mausereignisse durchgehen */
+  pointer-events: none;
+  /* damit Mausereignisse durchgehen */
   z-index: 1000000;
 }
 
@@ -901,12 +951,15 @@ article div.user-date {
   0% {
     content: " ";
   }
+
   33% {
     content: ".";
   }
+
   66% {
     content: "..";
   }
+
   100% {
     content: "...";
   }
@@ -1075,6 +1128,20 @@ div#message-input input {
   z-index: 2;
 }
 
+#start #git {
+  width: 40px;
+  height: auto;
+  position: fixed;
+  left: 20px;
+  top: 20px;
+  z-index: 2;
+}
+
+#start #git img {
+  width: 40px;
+  height: auto;
+}
+
 #start kbd#version {
   border: 2px solid rgb(17, 2, 5);
   box-shadow: 8px 8px rgb(46, 96, 233);
@@ -1113,6 +1180,26 @@ div#message-input input {
   top: 20px;
 }
 
+#chat #used-storage {
+  border: 2px solid rgb(17, 2, 5);
+  box-shadow: 8px 8px rgb(46, 96, 233);
+  font-size: small;
+  line-height: 0.85em;
+  display: block;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 3px 5px;
+  white-space: nowrap;
+  color: white;
+  width: fit-content;
+  height: 20px;
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 2;
+  color: black;
+}
+
 #app {
   overflow-y: scroll;
   overflow-x: hidden;
@@ -1120,7 +1207,13 @@ div#message-input input {
   padding: 0px 0 0 0;
   min-height: 100vh;
   max-height: 100vh;
-  outline: 10px solid rgb(174, 173, 179);
+
+  position: relative;
+  height: 100%;
+  width: 100%;
+  overflow-y: scroll;
+  overflow-x: hidden;
+  background: rgba(255, 196, 205, 0.2) !important;
 }
 
 article {
@@ -1141,6 +1234,7 @@ article img {
   max-width: 100%;
   margin: 0 0 5px 0;
   padding: 0px 10px 0 10px;
+  background: none;
 }
 
 #chat article:hover {
@@ -1174,16 +1268,18 @@ span.user-offline {
 }
 
 @media screen and (min-width: 360px) and (max-width: 1000px) {
+  #addressbook button[data-activ="true"] {
+    color: black !important;
+  }
+
+  #ab {
+    min-width: 100vw;
+  }
   #app {
     overflow-y: scroll;
     overflow-x: hidden;
     padding: 20px 0 0 0;
-
-    background-image: radial-gradient(circle, #e2dddd 10%, transparent 11%);
-    background-size: 5px 5px;
-
-    outline: 0px solid black;
-    box-shadow: 0px 0px lightblue;
+    background: none !important;
   }
 
   article {
@@ -1202,6 +1298,10 @@ span.user-offline {
     position: relative;
     overflow-y: scroll;
     overflow-x: hidden;
+  }
+
+  #start {
+    background: white;
   }
 
   #start #local-by-design {
@@ -1291,9 +1391,29 @@ span.user-offline {
   .only-desktop {
     display: none !important;
   }
+
+  #toolbar {
+    display: none !important;
+  }
+
+  #sidebar {
+    display: none !important;
+  }
 }
 
 @media screen and (max-width: 340px) {
+  #addressbook button[data-activ="true"] {
+    color: black !important;
+  }
+
+  #toolbar {
+    display: none !important;
+  }
+
+  #sidebar {
+    display: none !important;
+  }
+
   .only-desktop {
     display: none !important;
   }
@@ -1301,6 +1421,7 @@ span.user-offline {
   button {
     font-size: 0.8rem;
   }
+
   h1 {
     font-size: 1rem;
   }
@@ -1333,6 +1454,7 @@ span.user-offline {
   .page {
     padding: 40px 12px 10px 12px;
   }
+
   .input-parent:focus {
     background: orange;
   }
@@ -1372,9 +1494,11 @@ span.user-offline {
   #chat article:focus {
     background: rgba(180, 199, 168, 0.34);
   }
+
   #start {
     padding: 10px 10px 10px 10px;
     overflow: hidden;
+    background: white;
   }
 
   #start-text {
@@ -1396,6 +1520,11 @@ span.user-offline {
 
   #addressbook button.addressbook-item {
     padding: 10px;
+    cursor: pointer;
+  }
+
+  #addressbook button.addressbook-item:hover {
+    font-weight: bold;
   }
 
   #addressbook button.addressbook-item .inner {

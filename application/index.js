@@ -16,7 +16,6 @@ import {
   createAudioRecorder,
   list_files,
   get_file,
-  arrayBufferToBase64,
 } from "./assets/js/helper.js";
 import { stop_scan, start_scan } from "./assets/js/scan.js";
 import localforage from "localforage";
@@ -113,20 +112,6 @@ async function generateCoturnCredentials(url, sharedSecret, ttl = 3600) {
     password,
   };
 }
-
-//k2 polyfill
-/*
-if (!Blob.prototype.arrayBuffer) {
-  Blob.prototype.arrayBuffer = function () {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsArrayBuffer(this);
-    });
-  };
-}
-  */
 
 //test os version
 if (navigator.mozApps) {
@@ -284,7 +269,24 @@ if (status.test) {
         last_conversation_datetime: 1741625898228,
       },
     ];
-  }, 1000);
+  }, 3000);
+
+  chat_data = [
+    {
+      id: "aa",
+      from: "",
+      to: "",
+      type: "text",
+      payload: { text: "hello world" },
+    },
+    {
+      id: "aa",
+      from: "",
+      to: "",
+      type: "text",
+      payload: { text: "hello world" },
+    },
+  ];
 }
 
 localforage
@@ -317,6 +319,9 @@ let delete_addressbook_item = (userIdToDelete) => {
     .then((e) => {
       side_toaster("deleted", 3000);
       deleteChatDataByUser(userIdToDelete);
+      setTimeout(() => {
+        m.redraw();
+      }, 1000);
     })
     .catch((error) => {
       console.error("Error saving address book:", error);
@@ -348,6 +353,10 @@ let update_addressbook_item = (userIdToUpdate) => {
     .setItem("addressbook", addressbook)
     .then(() => {
       side_toaster("Contact updated successfully", 3000);
+
+      setTimeout(() => {
+        m.redraw();
+      }, 1000);
     })
     .catch((error) => {
       console.error("Error saving updated address book:", error);
@@ -936,6 +945,9 @@ async function getIceServers() {
       debug: 0,
       secure: false,
       config: ice_servers,
+      iceTransportPolicy: "relay",
+      iceTransports: "relay", // Fallback old Gecko-Engines
+      iceCandidatePoolSize: 2,
     });
 
     //disconnected from server try to reconnect
@@ -957,10 +969,8 @@ async function getIceServers() {
       const pc = conn.peerConnection;
       pc.addEventListener("icecandidate", (event) => {
         if (event.candidate) {
-          console.log("ICE Candidate:", event.candidate.candidate);
-
           if (event.candidate.type === "relay") {
-            console.log("TURN wird benutzt!");
+            console.log("TURN");
             console.log("Server:", event.candidate.candidate);
           }
         }
@@ -1757,7 +1767,7 @@ let connect_to_peer = function (
     localforage.removeItem("connect_to_id");
   } catch (e) {}
 
-  if (waiting) m.route.set("/waiting");
+  //if (waiting) m.route.set("/waiting");
 
   if (addressbook.length > 0) {
     let inAddressbook = addressbook.find((e) => e.id === id);
@@ -1885,44 +1895,6 @@ let scan_callback = function (n) {
   }
 };
 
-function roughSizeOfObject(obj) {
-  const str = JSON.stringify(obj);
-  return str.length * 2;
-}
-
-async function estimateLocalForageSize() {
-  let totalSize = 0;
-
-  await localforage.iterate((value, key) => {
-    totalSize += roughSizeOfObject(value);
-  });
-
-  console.log(`localForage total size: ~${(totalSize / 1024).toFixed(2)} KB`);
-  return totalSize;
-}
-
-estimateLocalForageSize();
-
-async function checkStorageUsage() {
-  if ("storage" in navigator && "estimate" in navigator.storage) {
-    let { usage, quota } = await navigator.storage.estimate();
-
-    let usedMB = (usage / (1024 * 1024)).toFixed(2);
-    let totalMB = (quota / (1024 * 1024)).toFixed(2);
-
-    console.log(`Storage used: ${usedMB} MB`);
-    console.log(`Aviable storage: ${totalMB} MB`);
-  } else {
-    console.log("Storage api not supported");
-  }
-
-  if (status.notKaiOS) {
-  }
-}
-
-// Aufruf der Funktion
-checkStorageUsage();
-
 //store chat data
 //todo use hash from string to compare
 
@@ -2017,6 +1989,19 @@ async function deleteOldChatData(days = 30) {
 }
 
 deleteOldChatData();
+
+if (navigator.serviceWorker.controller) {
+  navigator.serviceWorker.controller.postMessage({
+    action: "recalculateStorage",
+  });
+}
+
+localforage.getItem("app_db_usage_mb").then((e) => {
+  if (e > 30) {
+  }
+  status.usedStorage = e;
+  console.log("MB " + e);
+});
 
 //delete chat data by user
 
@@ -2401,6 +2386,188 @@ let setupVisualizer_k2 = function ({ mode, srcNode, audioElement }) {
 //////////////////////
 
 var root = document.getElementById("app");
+
+var addressbook_comp = {
+  oninit: () => {
+    key_delay();
+  },
+  onremove: () => {
+    status.viewReady = false;
+  },
+
+  view: function () {
+    return m("div", {}, [
+      m(
+        "div",
+        {
+          class: "addressbook-box col-xs-12 col-md-8",
+          id: "addressbook",
+        },
+        [
+          m("div", { class: "row" }, [
+            addressbook.map((e, i) =>
+              m("div", { class: "col-xs-12 col-md-10" }, [
+                m(
+                  "button",
+                  {
+                    class: "item addressbook-item row between-xs",
+                    "data-id": e.id,
+                    "data-client-id": e.client_id || "null",
+                    "data-nickname": e.nickname || e.name,
+                    "data-name": e.name || e.nickname,
+                    "data-activ":
+                      e.id == status.current_user_id ? "true" : "false",
+
+                    "data-online": e.live ? "true" : "false",
+
+                    oncreate: (vnode) => {
+                      setTabindex();
+                      if (i == 0) vnode.dom.focus();
+                    },
+                    onfocus: () => {
+                      status.addressbook_in_focus = e.id;
+                    },
+                    onkeydown: (h) => {
+                      if (h.key === "Enter") {
+                        connect_to_peer(
+                          document.activeElement.getAttribute("data-id")
+                        );
+
+                        status.current_user_id =
+                          document.activeElement.getAttribute("data-id");
+                        status.current_user_nickname = e.nickname;
+                        status.current_user_name = e.name;
+                        m.route.set(
+                          "/chat?id=" +
+                            settings.custom_peer_id +
+                            "&peer=" +
+                            status.current_user_id
+                        );
+                      }
+                    },
+                    onclick: () => {
+                      connect_to_peer(
+                        document.activeElement.getAttribute("data-id")
+                      );
+
+                      status.current_user_id =
+                        document.activeElement.getAttribute("data-id");
+                      status.current_user_nickname = e.nickname;
+                      status.current_user_name = e.name;
+                      m.route.set(
+                        "/chat?id=" +
+                          settings.custom_peer_id +
+                          "&peer=" +
+                          status.current_user_id
+                      );
+                    },
+                  },
+                  [
+                    m("div", { class: "col-xs-2 col-md-2" }, [
+                      m("div", { class: "online-indicator" }, ""),
+                      m("img", {
+                        class: "aavatar",
+                        src: create_avatar(e.name, 25),
+                      }),
+                    ]),
+
+                    m("div", { class: "inner col-xs-10 col-md-10" }, [
+                      m(
+                        "div",
+                        { class: "addressbook-item-name" },
+                        !e.name ? e.nickname : e.name
+                      ),
+                      m("div", { class: "row between-md" }, [
+                        e.last_conversation_message
+                          ? m(
+                              "small",
+                              {
+                                class:
+                                  "last-conversation-message col-xs-8 col-md-8",
+                              },
+                              e.last_conversation_message
+                            )
+                          : null,
+                        e.last_conversation_datetime
+                          ? m(
+                              "small",
+                              {
+                                class:
+                                  "last-conversation-date col-xs-4 col-md-4",
+                              },
+                              e.last_conversation_datetime
+                            )
+                          : null,
+
+                        m(
+                          "div",
+                          {
+                            class: "action-buttons",
+                          },
+                          [
+                            m(
+                              "span",
+                              {
+                                onclick: (env) => {
+                                  env.preventDefault();
+                                  env.stopPropagation();
+                                  let id =
+                                    env.target.closest("[data-id]")?.dataset.id;
+
+                                  update_addressbook_item(id);
+
+                                  document
+                                    .querySelectorAll(".swipe-left")
+                                    .forEach((e) => {
+                                      e.remove("swipe-left");
+                                    });
+                                },
+                              },
+                              [
+                                m("img", {
+                                  src: "assets/image/pencil.svg",
+                                }),
+                              ]
+                            ),
+                            m(
+                              "span",
+                              {
+                                onclick: (env) => {
+                                  env.preventDefault();
+                                  env.stopPropagation();
+
+                                  let id =
+                                    env.target.closest("[data-id]")?.dataset.id;
+
+                                  delete_addressbook_item(id);
+
+                                  document
+                                    .querySelectorAll(".swipe-left")
+                                    .forEach((e) => {
+                                      e.remove("swipe-left");
+                                    });
+                                },
+                              },
+                              [
+                                m("img", {
+                                  src: "assets/image/delete.svg",
+                                }),
+                              ]
+                            ),
+                          ]
+                        ),
+                      ]),
+                    ]),
+                  ]
+                ),
+              ])
+            ),
+          ]),
+        ]
+      ),
+    ]);
+  },
+};
 
 var waiting = {
   oninit: () => {
@@ -3484,6 +3651,7 @@ var start = {
           "div",
           {
             id: "logo",
+
             oncreate: (vnode) => {
               if (!status.notKaiOS) vnode.dom.style.display = "none";
             },
@@ -3507,116 +3675,7 @@ var start = {
             )
           : null,
 
-        addressbook.length > 0
-          ? m(
-              "div",
-              {
-                class: "addressbook-box col-xs-12 col-md-8",
-                id: "addressbook",
-              },
-              [
-                m("div", { class: "row" }, [
-                  addressbook.map((e, i) =>
-                    m("div", { class: "col-xs-12 col-md-10" }, [
-                      m(
-                        "button",
-                        {
-                          class: "item addressbook-item row between-xs",
-                          "data-id": e.id,
-                          "data-client-id": e.client_id || "null",
-                          "data-nickname": e.nickname || e.name,
-                          "data-name": e.name || e.nickname,
-
-                          "data-online": e.live ? "true" : "false",
-
-                          oncreate: (vnode) => {
-                            setTabindex();
-                            if (i == 0) vnode.dom.focus();
-                          },
-                          onfocus: () => {
-                            status.addressbook_in_focus = e.id;
-                          },
-                          onkeydown: (h) => {
-                            if (h.key === "Enter") {
-                              connect_to_peer(
-                                document.activeElement.getAttribute("data-id")
-                              );
-
-                              status.current_user_id =
-                                document.activeElement.getAttribute("data-id");
-                              status.current_user_nickname = e.nickname;
-                              status.current_user_name = e.name;
-                              m.route.set(
-                                "/chat?id=" +
-                                  settings.custom_peer_id +
-                                  "&peer=" +
-                                  status.current_user_id
-                              );
-                            }
-                          },
-                          onclick: () => {
-                            connect_to_peer(
-                              document.activeElement.getAttribute("data-id")
-                            );
-
-                            status.current_user_id =
-                              document.activeElement.getAttribute("data-id");
-                            status.current_user_nickname = e.nickname;
-                            status.current_user_name = e.name;
-                            m.route.set(
-                              "/chat?id=" +
-                                settings.custom_peer_id +
-                                "&peer=" +
-                                status.current_user_id
-                            );
-                          },
-                        },
-                        [
-                          m("div", { class: "col-xs-2 col-md-2" }, [
-                            m("div", { class: "online-indicator" }, ""),
-                            m("img", {
-                              class: "aavatar",
-                              src: create_avatar(e.name, 25),
-                            }),
-                          ]),
-
-                          m("div", { class: "inner col-xs-10 col-md-10" }, [
-                            m(
-                              "div",
-                              { class: "addressbook-item-name" },
-                              !e.name ? e.nickname : e.name
-                            ),
-                            m("div", { class: "row between-md" }, [
-                              e.last_conversation_message
-                                ? m(
-                                    "small",
-                                    {
-                                      class:
-                                        "last-conversation-message col-xs-8 col-md-8",
-                                    },
-                                    e.last_conversation_message
-                                  )
-                                : null,
-                              e.last_conversation_datetime
-                                ? m(
-                                    "small",
-                                    {
-                                      class:
-                                        "last-conversation-date col-xs-4 col-md-4",
-                                    },
-                                    e.last_conversation_datetime
-                                  )
-                                : null,
-                            ]),
-                          ]),
-                        ]
-                      ),
-                    ])
-                  ),
-                ]),
-              ]
-            )
-          : null,
+        m("#ab", m(addressbook_comp)),
 
         m(
           "kbd",
@@ -3643,11 +3702,25 @@ var start = {
           },
           [m("img", { src: "./assets/image/liberapay.svg" })]
         ),
+
+        m(
+          "a",
+          {
+            class: "only-desktop",
+
+            id: "git",
+            href: "https://github.com/strukturart/flop",
+            target: "_blank",
+            oncreate: (vnode) => {
+              if (!status.notKaiOS) vnode.dom.style.display = "none";
+            },
+          },
+          [m("img", { src: "./assets/image/git.png" })]
+        ),
         m(
           "kbd",
           {
             class: "only-desktop",
-
             id: "local-by-design",
           },
           "local by design"
@@ -3855,10 +3928,12 @@ var audiorecorder_view = {
       status.audioBlob = null;
       status.audioMimeType = null;
       status.audioRecorderDuration = 0;
+      status.audio_recording = false;
 
       clearInterval(status.audio_recorder_time);
       if (status.audioURL) URL.revokeObjectURL(status.audioURL);
       status.audioURL = null;
+      status.action = "";
 
       if (status.mediaElementSource) {
         try {
@@ -3988,6 +4063,38 @@ var scan = {
   },
 };
 
+const Toolbar = {
+  view: () => {
+    return status.notKaiOS
+      ? m("div", { id: "toolbar-content" }, [
+          m("img", {
+            src: "assets/image/image.svg",
+            onclick: function () {
+              pick_image(handleImage);
+            },
+            title: "share image",
+          }),
+          m("img", {
+            src: "assets/image/marker.svg",
+            onclick: function () {
+              m.route.set(
+                "/map_view?lat=" + 0 + "&lng=" + 0 + "&viewonly=false"
+              );
+            },
+            title: "share location",
+          }),
+          m("img", {
+            src: "assets/image/record.svg",
+            onclick: () => {
+              m.route.set("audiorecorder_view");
+            },
+            title: "share audio",
+          }),
+        ])
+      : null;
+  },
+};
+
 let user_check;
 let throttle = false;
 let page_counter = 0;
@@ -3996,6 +4103,7 @@ var chat = {
     key_delay();
     load_chat_data(status.current_user_id);
     status.action = "";
+    status.audio_recording = false;
 
     peer_is_online();
 
@@ -4038,6 +4146,18 @@ var chat = {
   onupdate: () => {
     //reproduce chat data
     load_chat_data(status.current_user_id);
+
+    if (status.notKaiOS) {
+      let username = status.current_user_name || status.current_user_nickname;
+
+      top_bar(
+        "<img src='assets/image/back.svg'>",
+        "<div id='name'>" + username.slice(0, 8) + "</div>",
+        "<span class='online-indicator'></span><img class='avatar' src=" +
+          create_avatar(username, 30) +
+          ">"
+      );
+    }
   },
 
   view: function () {
@@ -4057,7 +4177,11 @@ var chat = {
             localforage.removeItem("connect_to_id");
           } catch (e) {}
         },
+
         oncreate: () => {
+          m.mount(document.getElementById("toolbar"), Toolbar);
+          m.mount(document.getElementById("sidebar"), addressbook_comp);
+
           //try to send old messages
           messageQueueStorage.map((e) => {
             if (e.to == status.current_user_id && e.type != "typing") {
@@ -4088,6 +4212,7 @@ var chat = {
           );
           let every_10_secs = 0;
           user_check = setInterval(() => {
+            username = status.current_user_name || status.current_user_nickname;
             //ping
             if (every_10_secs >= 0) {
               every_10_secs++;
@@ -4101,6 +4226,7 @@ var chat = {
               status.userOnline = connectedPeers.length;
 
               if (connectedPeers.includes(status.current_user_id)) {
+                /*
                 top_bar(
                   "",
                   "<div id='name'>" + username.slice(0, 6) + "</div>",
@@ -4117,6 +4243,7 @@ var chat = {
                       create_avatar(username, 30) +
                       ">"
                   );
+                  */
 
                 document
                   .querySelector("span.online-indicator")
@@ -4126,6 +4253,7 @@ var chat = {
                   .querySelector("span.online-indicator")
                   .classList.add("user-online");
               } else {
+                /*
                 top_bar(
                   "",
                   "<div id='name'>" + username.slice(0, 8) + "</div>",
@@ -4142,6 +4270,7 @@ var chat = {
                       create_avatar(username, 30) +
                       ">"
                   );
+                  */
 
                 document
                   .querySelector("span.online-indicator")
@@ -4234,6 +4363,7 @@ var chat = {
         : null,
 
       chat_data.map(function (item, index) {
+        if (chat_data.length == 0) return;
         if (index < page_counter) return;
         const currentIndex = index;
         const isLast = currentIndex === chat_data.length - 1;
@@ -4481,7 +4611,18 @@ var chat = {
           ]
         );
       }),
-      m("div", { id: "typing-indicator", class: "" }, "")
+      m("div", { id: "typing-indicator", class: "" }, ""),
+      status.usedStorage.length > 0
+        ? m(
+            "kbd",
+            {
+              class: "only-desktop",
+              id: "used-storage",
+              title: "used storage in mb",
+            },
+            status.usedStorage + "MB"
+          )
+        : null
     );
   },
 };
@@ -4564,6 +4705,7 @@ m.route(root, "/intro", {
   "/filelist": filelist,
   "/AudioComponent": AudioComponent,
   "/audiorecorder_view": audiorecorder_view,
+  "/addressbiook_comp": addressbook_comp,
 });
 
 function scrollToCenter() {
@@ -4659,37 +4801,55 @@ document.addEventListener("DOMContentLoaded", function (e) {
     scrollToCenter();
   };
 
-  document.addEventListener("swiped", function (e) {
-    e.preventDefault();
+  //lonpress
+  /*
+  let longpressTimer;
+
+  const triggerSwipeLeft = (element) => {
+    document.querySelectorAll(".swipe-left").forEach((el) => {
+      el.classList.remove("swipe-left");
+    });
+    if (element) {
+      element.classList.add("swipe-left");
+    }
+  };
+
+  document.addEventListener("pointerdown", function (e) {
+    document.querySelectorAll(".swipe-left").forEach((el) => {
+      el.classList.remove("swipe-left");
+    });
+    clearTimeout(longpressTimer);
 
     let a = e.target.closest("button.addressbook-item");
 
-    if (a && e.detail.dir === "left") {
-      a.classList.add("swipe-left"); // Move the button to the right
-
-      setTimeout(() => {
-        let ask0 = confirm("Do you want to delete this contact?");
-        if (ask0) {
-          delete_addressbook_item(a.getAttribute("data-id"));
-        } else {
-          a.classList.remove("swipe-left");
-        }
-      }, 500);
-    }
-
-    if (a && e.detail.dir === "right") {
-      a.classList.add("swipe-right"); // Move the button to the left
-
-      setTimeout(() => {
-        let ask1 = confirm("Do you want to edit this contact?");
-        if (ask1) {
-          update_addressbook_item(a.getAttribute("data-id"));
-        }
-        // Revert position regardless of the choice
-        a.classList.remove("swipe-right");
-      }, 500); // Consistent shorter delay
+    if (a) {
+      longpressTimer = setTimeout(() => {
+        triggerSwipeLeft(a);
+      }, 1600);
     }
   });
+
+  document.addEventListener("pointerup", function (e) {
+    clearTimeout(longpressTimer);
+  });
+  */
+
+  //swipe events !KaiOS only
+  if (status.notKaiOS) {
+    document.addEventListener("swiped", function (e) {
+      e.preventDefault();
+
+      document.querySelectorAll(".swipe-left").forEach((e) => {
+        e.classList.remove("swipe-left");
+      });
+
+      let a = e.target.closest("button.addressbook-item");
+
+      if (a && e.detail.dir === "left") {
+        a.classList.add("swipe-left");
+      }
+    });
+  }
 
   // Add click listeners to simulate key events
   document
@@ -4825,7 +4985,7 @@ document.addEventListener("DOMContentLoaded", function (e) {
         }
 
         if (route.startsWith("audiorecorder_view")) {
-          history.back();
+          m.route.set("/chat?id=" + settings.custom_peer_id);
           return;
         }
 
@@ -4947,7 +5107,7 @@ document.addEventListener("DOMContentLoaded", function (e) {
         }
 
         if (route.startsWith("audiorecorder_view")) {
-          history.back();
+          m.route.set("/chat?id=" + settings.custom_peer_id);
           return;
         }
 
@@ -5023,6 +5183,8 @@ document.addEventListener("DOMContentLoaded", function (e) {
               undefined
             );
 
+            status.audio_recording = false;
+
             history.back();
           }
         }
@@ -5059,6 +5221,8 @@ document.addEventListener("DOMContentLoaded", function (e) {
 
       case "Escape":
         if (route.startsWith("audiorecorder_view")) {
+          status.action = "";
+          status.audio_recording = false;
           history.back();
         }
 
@@ -5209,9 +5373,9 @@ document.addEventListener("DOMContentLoaded", function (e) {
     }
   }
 
-  // ///////////////////////////////
-  // //shortpress / longpress logic
-  // //////////////////////////////
+  /////////////////////////////////
+  ////shortpress / longpress logic
+  ////////////////////////////////
 
   function handleKeyDown(evt) {
     if (evt.key == "Backspace" && document.activeElement.tagName != "INPUT") {
