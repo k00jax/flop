@@ -33,6 +33,12 @@
       "type": "image/png",
       "sizes": "192x192"
     },
+
+    {
+      "src": "assets/icons/apple-touch-icon.png",
+      "type": "image/png",
+      "sizes": "180x180"
+    },
     {
       "src": "assets/icons/icon-512.png",
       "type": "image/png",
@@ -53,7 +59,7 @@
   ],
 
   "b2g_features": {
-    "version": "0.3417",
+    "version": "0.3422",
     "id": "flop",
     "subtitle": "flop WebRTC chat app",
     "core": true,

@@ -138,6 +138,11 @@ article img {
   cursor: pointer;
 }
 
+#toolbar #toolbar-bottom {
+  position: absolute;
+  bottom: 60px;
+}
+
 img[src=""] {
   display: none;
 }
