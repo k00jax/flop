@@ -76,7 +76,7 @@ export let status = {
   kaiosversion: "unknow",
   audioCtx: "",
   communicationRequest: [],
-  appVersion: "0.24755",
+  appVersion: "0.24775",
 };
 
 async function generateCoturnCredentials(url, sharedSecret, ttl = 3600) {
@@ -136,6 +136,11 @@ if (navigator.mozApps) {
 }
 
 export let settings = {};
+
+localforage.getItem("settings").then((value) => {
+  settings = value;
+  console.log(settings);
+});
 
 if (!status.notKaiOS) {
   const scripts = [
@@ -353,11 +358,10 @@ let update_addressbook_item = (userIdToUpdate) => {
   localforage
     .setItem("addressbook", addressbook)
     .then(() => {
-      side_toaster("Contact updated successfully", 3000);
-
       setTimeout(() => {
-        m.redraw();
-      }, 1000);
+        m.route.set("/intro");
+        side_toaster("Contact updated successfully", 3000);
+      }, 100);
     })
     .catch((error) => {
       console.error("Error saving updated address book:", error);
@@ -475,6 +479,7 @@ function setupConnectionEvents(conn) {
         */
         try {
           let k = JSON.parse(conn.metadata);
+
           k = k.history_of_ids;
 
           if (Array.isArray(k) && k.length > 1) {
@@ -576,8 +581,10 @@ function setupConnectionEvents(conn) {
     //
     try {
       let clientID = JSON.parse(conn.metadata);
+      let clientServerUrl = clientID.signaling_server_url || "";
+      console.log("test" + clientServerUrl);
+
       clientID = clientID.unique_id;
-      clientServerUrl = clientID.signaling_server_url;
 
       addressbook.forEach((e) => {
         if (e.id == data.from) {
@@ -588,9 +595,14 @@ function setupConnectionEvents(conn) {
 
           if (!e.client_id || e.client_id == "null") {
             e.client_id = clientID;
-            e.serverUrl = clientServerUrl;
             localforage.setItem("addressbook", addressbook).then(() => {
               console.log("addressbook updated with clientID");
+            });
+          }
+          if (!e.serverUrl || e.serverUrl == "null") {
+            e.serverUrl = clientServerUrl;
+            localforage.setItem("addressbook", addressbook).then(() => {
+              console.log("addressbook updated with serverURL");
             });
           }
         }
@@ -945,7 +957,7 @@ async function getIceServers() {
       iceCandidatePoolSize: 3,
     });
 
-    console.log(peer);
+    console.log(status);
 
     //disconnected from server try to reconnect
     peer.on("disconnected", () => {
@@ -1108,7 +1120,7 @@ localforage
 
     const defaultValues = {
       nickname: generateRandomString(10),
-      server_url: "peerjs.strukturart.com",
+      server_url: "peerjs.flop.chat",
       server_path: "/peerjs",
       server_port: "443",
       invite_url: "https://flop.chat/",
@@ -1124,9 +1136,10 @@ localforage
 
     //force new peerjs server
     if (status.appVersion > 0.24755) {
-      settings.server_url = "peerjs.strukturart.com";
+      settings.server_url = "peerjs.flop.chat";
       settings.server_path = "/peerjs";
       settings.server_port = "443";
+      localforage.setItem("settings", settings).then(() => {});
     }
 
     if (!settings.unique_id) {
@@ -1906,7 +1919,6 @@ let scan_callback = function (n) {
   } else {
     let m = n.split("id=");
     status.action = "";
-    alert(m[1]);
     connect_to_peer(m[1]);
   }
 };
@@ -2455,6 +2467,7 @@ var addressbook_comp = {
                     "data-client-id": e.client_id || "null",
                     "data-nickname": e.nickname || e.name,
                     "data-name": e.name || e.nickname,
+                    "data-server-url": e.serverUrl || "",
                     "data-activ":
                       e.id == status.current_user_id ? "true" : "false",
 
