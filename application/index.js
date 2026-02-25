@@ -1,5 +1,7 @@
 "use strict";
 
+console.log("[flop] index.js loaded", location.href);
+
 import {
   pick_file,
   pick_zip_file,
