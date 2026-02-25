@@ -156,8 +156,7 @@ if (navigator.mozApps) {
 export let settings = {};
 
 localforage.getItem("settings").then((value) => {
-  settings = value;
-  console.log(settings);
+  console.log(value);
 });
 
 if (!status.notKaiOS) {
@@ -211,6 +210,32 @@ function resetWebIdentity() {
     .finally(() => {
       window.location.reload();
     });
+}
+
+function ensureStablePeerId() {
+  if (!status.notKaiOS) {
+    return settings.custom_peer_id;
+  }
+
+  const stablePeerId = getOrCreatePeerId();
+  if (!stablePeerId) {
+    return settings.custom_peer_id;
+  }
+
+  settings.custom_peer_id = stablePeerId;
+
+  localforage
+    .getItem("settings")
+    .then((stored) => {
+      const next = stored || {};
+      if (next.custom_peer_id !== stablePeerId) {
+        next.custom_peer_id = stablePeerId;
+        return localforage.setItem("settings", next);
+      }
+    })
+    .catch(() => {});
+
+  return stablePeerId;
 }
 
 function mergePeerStoreIntoAddressbook() {
@@ -1323,6 +1348,8 @@ let ice_servers = {
 
 //load ICE Server
 async function getIceServers() {
+  ensureStablePeerId();
+
   //only set new peer if no peer exist
   if (peer) {
     console.log("peer exist");
@@ -2434,7 +2461,7 @@ let peer_is_online = async function () {
 //connect to peer
 let connect_to_peer = function (
   id,
-  nickname = generateRandomString(10),
+  nickname = "",
   open_view = true,
 ) {
   if (!navigator.onLine) {
@@ -2454,11 +2481,15 @@ let connect_to_peer = function (
       status.current_user_name = inAddressbook.name || "";
       status.current_user_id = id;
     } else {
-      status.current_user_nickname = nickname || generateRandomString(10);
+      status.current_user_nickname = nickname || id;
+      status.current_user_name = nickname || id;
+      ensureAddressbookEntry(id, nickname || id);
     }
   } else {
     status.current_user_id = id;
-    status.current_user_nickname = nickname || generateRandomString(10);
+    status.current_user_nickname = nickname || id;
+    status.current_user_name = nickname || id;
+    ensureAddressbookEntry(id, nickname || id);
   }
 
   upsertWebPeer(id, status.current_user_name || status.current_user_nickname);
@@ -2479,7 +2510,7 @@ let connect_to_peer = function (
     status.current_user_id = id;
     return;
   } else {
-    setTimeout(() => {
+    const attemptConnect = () => {
       try {
         console.log("Attempting to connect to peer with ID:", id);
         let user_meta = {
@@ -2503,7 +2534,9 @@ let connect_to_peer = function (
           status.current_user_nickname = inAddressbook.nickname || "";
           status.current_user_name = inAddressbook.name || "";
         } else {
-          status.current_user_nickname = nickname || generateRandomString(10);
+          status.current_user_nickname = nickname || id;
+          status.current_user_name = nickname || id;
+          ensureAddressbookEntry(id, nickname || id);
         }
 
         if (conn) {
@@ -2536,7 +2569,13 @@ let connect_to_peer = function (
       } catch (e) {
         //side_toaster("Connection could not be established", 5000);
       }
-    }, 7000);
+    };
+
+    if (peer && peer.open) {
+      attemptConnect();
+    } else {
+      setTimeout(attemptConnect, 500);
+    }
   }
 };
 
@@ -4327,6 +4366,9 @@ var options = {
 var intro = {
   oninit: () => {
     key_delay();
+
+    ensureStablePeerId();
+
     //create peer on start
     getIceServers();
     generate_contact();
