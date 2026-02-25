@@ -1085,7 +1085,17 @@ async function getIceServers() {
       if (p.startsWith("/start")) top_bar("", "", "");
     }
 
-    const a = response ? await response.json() : [];
+    let a = [];
+    if (response) {
+      try {
+        const contentType = response.headers.get("content-type") || "";
+        a = contentType.includes("application/json")
+          ? await response.json()
+          : [];
+      } catch {
+        a = [];
+      }
+    }
 
     a.forEach((credential) => {
       if (
@@ -1922,6 +1932,12 @@ async function sendMessageToAll(message) {
 //webPush
 const webPush_reg = async (action) => {
   const publicKey = process.env.VAPID_PUBLIC;
+  const subscribeEndpoint = process.env.WEBPUSH_SUBSCRIPE;
+
+  if (!subscribeEndpoint) {
+    console.log("WEBPUSH_SUBSCRIPE not configured, skipping webpush register");
+    return;
+  }
 
   if ("serviceWorker" in navigator && "PushManager" in window) {
     try {
@@ -1944,7 +1960,7 @@ const webPush_reg = async (action) => {
         });
       }
 
-      fetch(process.env.WEBPUSH_SUBSCRIPE + "?action=" + action, {
+      fetch(subscribeEndpoint + "?action=" + action, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1957,10 +1973,16 @@ const webPush_reg = async (action) => {
         .then((response) => response.text())
         .then((text) => {
           console.log("Antwort des Servers:", text);
-          return JSON.parse(text);
+          try {
+            return JSON.parse(text);
+          } catch {
+            return null;
+          }
         })
         .then((data) => {
-          console.log("JSON-Daten:", data);
+          if (data) {
+            console.log("JSON-Daten:", data);
+          }
         })
         .catch((error) => {
           console.error("Fehler:", error);
@@ -1975,6 +1997,10 @@ const webPush_reg = async (action) => {
 
 // send webPush
 function sendPushMessage(userId, message) {
+  if (!process.env.WEBPUSH_SEND) {
+    return;
+  }
+
   console.log("webPush sent to " + userId);
   fetch(process.env.WEBPUSH_SEND, {
     method: "POST",
@@ -1993,10 +2019,16 @@ function sendPushMessage(userId, message) {
           `Server returned ${response.status} ${response.statusText}`,
         );
       }
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        return null;
+      }
       return response.json();
     })
     .then((data) => {
-      console.log("JSON-Daten:", data);
+      if (data) {
+        console.log("JSON-Daten:", data);
+      }
     })
     .catch((error) => {
       console.error("Fehler:", error);
@@ -2005,16 +2037,33 @@ function sendPushMessage(userId, message) {
 
 //check webpush
 setTimeout(() => {
+  if (!process.env.WEBPUSH_CHECK) {
+    return;
+  }
+
   fetch(process.env.WEBPUSH_CHECK + "?id=" + settings.unique_id)
-    .then((res) => res.json())
+    .then((res) => {
+      if (!res.ok) {
+        return null;
+      }
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        return null;
+      }
+      return res.json();
+    })
     .then((r) => {
+      if (!r) {
+        return;
+      }
       console.log(r);
       if (r.registered) {
         settings.webpush = true;
       } else {
         settings.webpush = false;
       }
-    });
+    })
+    .catch(() => {});
 }, 5000);
 
 //connect to peer
@@ -4106,11 +4155,24 @@ var intro = {
               } catch (e) {}
 
               if ("b2g" in navigator || status.notKaiOS) {
-                fetch("/manifest.webmanifest")
-                  .then((r) => r.json())
+                fetch("./manifest.webmanifest")
+                  .then((r) => {
+                    if (!r.ok) {
+                      return null;
+                    }
+                    const contentType = r.headers.get("content-type") || "";
+                    if (!contentType.includes("application/json")) {
+                      return null;
+                    }
+                    return r.json();
+                  })
                   .then((parsedResponse) => {
+                    if (!parsedResponse) {
+                      return;
+                    }
                     status.version = parsedResponse.b2g_features.version;
-                  });
+                  })
+                  .catch(() => {});
               }
             };
             getManifest(get_manifest_callback);
