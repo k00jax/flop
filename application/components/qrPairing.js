@@ -30,8 +30,7 @@ function extractPeerId(rawValue) {
 }
 
 export async function createPairingQrDataUrl(peerId) {
-  const shareUrl = `${window.location.origin}${window.location.pathname}?peer=${encodeURIComponent(peerId)}`;
-  return QRCode.toDataURL(shareUrl, {
+  return QRCode.toDataURL(String(peerId || "").trim(), {
     margin: 1,
     width: 1000,
   });

@@ -42,7 +42,29 @@ function resolveKnownImageSrc(rawSrc = "") {
     return "";
   }
 
-  return BAR_ICON_URLS[fileName] || "";
+  const lower = fileName.toLowerCase();
+
+  if (BAR_ICON_URLS[lower]) {
+    return BAR_ICON_URLS[lower];
+  }
+
+  const prefixedMatch = lower.match(/^image([a-z0-9_-]+)\.[a-f0-9]+\.(svg|png)$/);
+  if (prefixedMatch) {
+    const normalized = `${prefixedMatch[1]}.${prefixedMatch[2]}`;
+    if (BAR_ICON_URLS[normalized]) {
+      return BAR_ICON_URLS[normalized];
+    }
+  }
+
+  const hashedMatch = lower.match(/^([a-z0-9_-]+)\.[a-f0-9]+\.(svg|png)$/);
+  if (hashedMatch) {
+    const normalized = `${hashedMatch[1]}.${hashedMatch[2]}`;
+    if (BAR_ICON_URLS[normalized]) {
+      return BAR_ICON_URLS[normalized];
+    }
+  }
+
+  return "";
 }
 
 function rewriteKnownImageSources(root = document) {

@@ -587,6 +587,33 @@ function ensureAddressbookEntry(peerId, nickname = "") {
 function normalizeInboundData(rawData, conn) {
   let data = rawData;
 
+  if (typeof data === "string") {
+    const trimmed = data.trim();
+    if (
+      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"))
+    ) {
+      try {
+        data = JSON.parse(trimmed);
+      } catch {
+        data = rawData;
+      }
+    }
+  }
+
+  if (
+    data &&
+    typeof data === "object" &&
+    data.data &&
+    typeof data.data === "object" &&
+    !Array.isArray(data.data)
+  ) {
+    data = {
+      ...data,
+      ...data.data,
+    };
+  }
+
   if (!data || typeof data !== "object") {
     data = {
       type: "text",
@@ -600,11 +627,31 @@ function normalizeInboundData(rawData, conn) {
   if (!data.to) data.to = settings.custom_peer_id;
   if (!data.id) data.id = uuidv4(16);
   if (!data.datetime) data.datetime = new Date();
+  if (data.type) {
+    data.type = String(data.type).toLowerCase();
+  }
+
+  if (["msg", "message", "chat", "string"].includes(data.type)) {
+    if (!data.payload || typeof data.payload !== "object") {
+      data.payload = {};
+    }
+    if (typeof data.payload.text !== "string") {
+      data.payload.text =
+        data.payload.message ||
+        data.message ||
+        data.text ||
+        data.content ||
+        "";
+    }
+    data.type = "text";
+  }
   if (!data.type) {
     if (typeof data.text === "string") {
       data.payload = { text: data.text };
     } else if (typeof data.message === "string") {
       data.payload = { text: data.message };
+    } else if (typeof data.content === "string") {
+      data.payload = { text: data.content };
     }
     data.type = "text";
   }
@@ -629,7 +676,96 @@ function normalizeInboundData(rawData, conn) {
     data.payload.text = data.message;
   }
 
+  if (
+    data.type === "text" &&
+    typeof data.payload.text !== "string" &&
+    typeof data.content === "string"
+  ) {
+    data.payload.text = data.content;
+  }
+
   return data;
+}
+
+function handleInboundWebMessage(data) {
+  if (!status.notKaiOS) {
+    return false;
+  }
+
+  const supportedTypes = ["text", "image", "audio", "contact", "gps", "gps_live"];
+  if (!supportedTypes.includes(data.type)) {
+    return false;
+  }
+
+  if (restrict_same_id.includes(data.id)) {
+    return true;
+  }
+
+  const inboundPeerId = data.from || "";
+  if (!inboundPeerId) {
+    return false;
+  }
+
+  if (!data.payload || typeof data.payload !== "object") {
+    data.payload = {};
+  }
+
+  if (data.type === "text") {
+    const rawText =
+      data.payload.text ||
+      data.payload.message ||
+      data.content ||
+      data.message ||
+      "";
+    const cleanedText = DOMPurify.sanitize(String(rawText));
+    if (!cleanedText.trim()) {
+      return false;
+    }
+    data.payload.text = cleanedText;
+  }
+
+  const inboundName = data.nickname || inboundPeerId;
+  const inboundEntry = ensureAddressbookEntry(inboundPeerId, inboundName);
+
+  status.current_user_id = inboundPeerId;
+  status.current_user_name = inboundEntry?.name || "";
+  status.current_user_nickname = inboundName;
+
+  chat_data.push({
+    id: data.id,
+    nickname: inboundName,
+    datetime: data.datetime || new Date(),
+    payload: data.payload,
+    type: data.type,
+    from: inboundPeerId,
+    to: data.to || settings.custom_peer_id,
+  });
+
+  if (data.type === "text" && inboundEntry) {
+    inboundEntry.last_conversation_message = data.payload.text;
+    inboundEntry.last_conversation_datetime = dayjs().format("HH:mm");
+    localforage.setItem("addressbook", addressbook).catch(() => {});
+  }
+
+  persistWebMessage(
+    inboundPeerId,
+    "in",
+    data.type,
+    data.payload || {},
+    data.id,
+    inboundPeerId,
+    data.to,
+  );
+
+  restrict_same_id.push(data.id);
+
+  m.route.set("/chat?id=" + settings.custom_peer_id + "&peer=" + inboundPeerId);
+
+  storeChatData().then(() => {
+    m.redraw();
+  });
+
+  return true;
 }
 
 function registerConnection(conn, options = {}) {
@@ -758,6 +894,10 @@ function registerConnection(conn, options = {}) {
 
     console.log("[INBOUND DATA]", conn.peer, data);
 
+    if (handleInboundWebMessage(data)) {
+      return;
+    }
+
     upsertWebPeer(data.from, data.nickname || "");
     ensureAddressbookEntry(data.from, data.nickname || conn.peer);
 
@@ -862,6 +1002,9 @@ function registerConnection(conn, options = {}) {
       data.type == "audio" ||
       data.type == "contact"
     ) {
+      status.current_user_id = data.from;
+      status.current_user_nickname = data.nickname || data.from;
+
       //is not in addressbook - ask
       //is in addressbook - notify
       let inAddressbook = addressbook.find((e) => e.id === data.from);
@@ -912,7 +1055,20 @@ function registerConnection(conn, options = {}) {
 
       //sanitize text
       if (data.type == "text") {
-        let originalContent = data.payload.text;
+        let originalContent =
+          data.payload.text ||
+          data.payload.message ||
+          (typeof data.payload === "string" ? data.payload : "");
+
+        if (typeof originalContent !== "string") {
+          originalContent = String(originalContent || "");
+        }
+
+        if (!data.payload || typeof data.payload !== "object") {
+          data.payload = {};
+        }
+
+        data.payload.text = originalContent;
         let sanitizedContent = DOMPurify.sanitize(originalContent);
 
         if (originalContent !== sanitizedContent) {
@@ -938,6 +1094,18 @@ function registerConnection(conn, options = {}) {
 
         focus_last_article();
         stop_scan();
+
+      const currentRoute = m.route.get();
+      const inChatRoute = currentRoute.startsWith("/chat");
+      const viewingOtherPeer =
+        inChatRoute && status.current_user_id && status.current_user_id !== data.from;
+
+      if (!inChatRoute || viewingOtherPeer) {
+        m.route.set(
+          "/chat?id=" + settings.custom_peer_id + "&peer=" + data.from,
+        );
+      }
+
 
         //Last conversation
 
@@ -3460,7 +3628,7 @@ var invite = {
       [
         m("div", { class: "" }, [
           m("img", { src: status.invite_qr }),
-          m("div", { class: "" }, settings.nickname),
+          m("div", { class: "" }, settings.custom_peer_id),
         ]),
       ],
     );
