@@ -8,6 +8,13 @@ function extractPeerId(rawValue) {
     return value;
   }
 
+  if (!/^https?:\/\//i.test(value)) {
+    const compact = value.replace(/\s+/g, "");
+    if (/^[a-z0-9._-]{6,}$/i.test(compact)) {
+      return compact;
+    }
+  }
+
   try {
     const parsed = new URL(value, window.location.origin);
     const fromSearch =
