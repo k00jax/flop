@@ -53,11 +53,13 @@ const peerMap = loadMap();
 const peerConnections = new Map();
 
 function shortPeerId(peerId) {
-  return String(peerId || "unknown").replace(/[^a-zA-Z0-9-_]/g, "").slice(0, 8).toLowerCase();
+  if (!peerId) return "";
+  return String(peerId).replace(/[^a-zA-Z0-9-_]/g, "").slice(0, 8).toLowerCase();
 }
 
 function channelNameForPeer(peerId) {
-  return `flop-${shortPeerId(peerId)}`;
+  const shortId = shortPeerId(peerId) || "unknown";
+  return `flop-${shortId}`;
 }
 
 async function getCategoryChannel(guild) {
@@ -134,9 +136,10 @@ async function postIncomingToDiscord(peerId, data) {
 
   const channel = await getOrCreatePeerChannel(guild, peerId);
   const text = data?.payload?.text || "[non-text message]";
-  const type = data?.type || "text";
+  const shortId = shortPeerId(peerId);
+  const prefix = shortId ? `[IN ${shortId}]` : "[IN]";
 
-  await channel.send(`[IN] ⬅️ **${peerId}** (${type})\n${text}`);
+  await channel.send(`${prefix} ${text}`);
 }
 
 function getPeerIdByChannelId(channelId) {
@@ -244,7 +247,9 @@ discordClient.on("messageCreate", async (message) => {
   if (!content) return;
 
   sendToPeer(peerId, content);
-  await message.channel.send(`[OUT] ➡️ **${peerId}**\n${content}`);
+  const shortId = shortPeerId(peerId);
+  const prefix = shortId ? `[OUT ${shortId}]` : "[OUT]";
+  await message.channel.send(`${prefix} ${content}`);
 });
 
 discordClient.login(DISCORD_BOT_TOKEN);

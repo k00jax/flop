@@ -5333,6 +5333,13 @@ function scrollToCenter() {
 document.addEventListener("DOMContentLoaded", function (e) {
   if (status.notKaiOS) {
     document.body.classList.add("desktop-web");
+    const wrapper = document.querySelector("#wrapper");
+    if (wrapper) {
+      wrapper.style.display = "block";
+    }
+    document.querySelector("body").style.background = "white";
+    document.querySelector("html").style.background = "white";
+    document.querySelector("#app").style.background = "white";
   }
 
   /////////////////
@@ -5985,22 +5992,37 @@ document.addEventListener("DOMContentLoaded", function (e) {
   }
 });
 
-try {
-  navigator.serviceWorker
-    .register(new URL("sw.js", import.meta.url), {
-      type: "module",
-    })
-    .then((registration) => {
-      if (registration.waiting) {
-        // There's a new service worker waiting to activate
-        // You can prompt the user to reload the page to apply the update
-        // For example: show a message to the user
-      } else {
-        // No waiting service worker, registration was successful
-      }
-    });
-} catch (e) {
-  console.log(e);
+const isLocalDevHost =
+  window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1";
+
+if ("serviceWorker" in navigator) {
+  if (isLocalDevHost) {
+    navigator.serviceWorker
+      .getRegistrations()
+      .then((registrations) => {
+        registrations.forEach((registration) => registration.unregister());
+      })
+      .catch(() => {});
+  } else {
+    try {
+      navigator.serviceWorker
+        .register(new URL("sw.js", import.meta.url), {
+          type: "module",
+        })
+        .then((registration) => {
+          if (registration.waiting) {
+            // There's a new service worker waiting to activate
+            // You can prompt the user to reload the page to apply the update
+            // For example: show a message to the user
+          } else {
+            // No waiting service worker, registration was successful
+          }
+        });
+    } catch (e) {
+      console.log(e);
+    }
+  }
 }
 
 if (!status.notKaiOS) {
@@ -6025,31 +6047,33 @@ if (!status.notKaiOS) {
   } catch (e) {}
 
   //webActivity KaiOS 3
-  try {
-    navigator.serviceWorker
-      .register(new URL("sw.js", import.meta.url), {
-        type: "module",
-      })
-      .then((registration) => {
-        if (registration.waiting) {
-          // There's a new service worker waiting to activate
-          // You can prompt the user to reload the page to apply the update
-          // For example: show a message to the user
-        } else {
-          // No waiting service worker, registration was successful
-        }
+  if (!isLocalDevHost) {
+    try {
+      navigator.serviceWorker
+        .register(new URL("sw.js", import.meta.url), {
+          type: "module",
+        })
+        .then((registration) => {
+          if (registration.waiting) {
+            // There's a new service worker waiting to activate
+            // You can prompt the user to reload the page to apply the update
+            // For example: show a message to the user
+          } else {
+            // No waiting service worker, registration was successful
+          }
 
-        registration.systemMessageManager.subscribe("activity").then(
-          (rv) => {
-            console.log(rv);
-          },
-          (error) => {
-            console.log(error);
-          },
-        );
-      });
-  } catch (e) {
-    console.log(e);
+          registration.systemMessageManager.subscribe("activity").then(
+            (rv) => {
+              console.log(rv);
+            },
+            (error) => {
+              console.log(error);
+            },
+          );
+        });
+    } catch (e) {
+      console.log(e);
+    }
   }
 }
 
