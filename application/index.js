@@ -577,6 +577,19 @@ let load_chat_data = (id) => {
 //track connections
 
 let restrict_same_id = [];
+
+function isLegacyRandomLabel(label = "", peerId = "") {
+  const value = String(label || "").trim();
+  const id = String(peerId || "").trim();
+
+  if (!value) return false;
+  if (id && value === id) return false;
+  if (/^flop-/i.test(value)) return false;
+  if (/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(value)) return false;
+
+  return /^[a-z0-9]{5,12}$/i.test(value);
+}
+
 function ensureAddressbookEntry(peerId, nickname = "") {
   if (!peerId) {
     return null;
@@ -584,6 +597,16 @@ function ensureAddressbookEntry(peerId, nickname = "") {
 
   let existing = addressbook.find((entry) => entry.id === peerId);
   if (existing) {
+    const incomingName = String(nickname || "").trim();
+    const existingName = String(existing.name || existing.nickname || "").trim();
+
+    if (!existingName || isLegacyRandomLabel(existingName, peerId)) {
+      const nextName = incomingName || peerId;
+      existing.name = nextName;
+      existing.nickname = nextName;
+      localforage.setItem("addressbook", addressbook).catch(() => {});
+    }
+
     return existing;
   }
 
@@ -2477,6 +2500,12 @@ let connect_to_peer = function (
     let inAddressbook = addressbook.find((e) => e.id === id);
 
     if (inAddressbook) {
+      if (isLegacyRandomLabel(inAddressbook.nickname || inAddressbook.name, id)) {
+        inAddressbook.nickname = id;
+        inAddressbook.name = id;
+        localforage.setItem("addressbook", addressbook).catch(() => {});
+      }
+
       status.current_user_nickname = inAddressbook.nickname || "";
       status.current_user_name = inAddressbook.name || "";
       status.current_user_id = id;
@@ -2510,7 +2539,18 @@ let connect_to_peer = function (
     status.current_user_id = id;
     return;
   } else {
-    const attemptConnect = () => {
+    const attemptConnect = (retriesLeft = 20) => {
+      if (!peer || !peer.open) {
+        try {
+          getIceServers();
+        } catch (e) {}
+
+        if (retriesLeft > 0) {
+          setTimeout(() => attemptConnect(retriesLeft - 1), 1000);
+        }
+        return;
+      }
+
       try {
         console.log("Attempting to connect to peer with ID:", id);
         let user_meta = {
@@ -2564,18 +2604,20 @@ let connect_to_peer = function (
               err.type || err.name,
               err.message || err,
             );
+
+            if (retriesLeft > 0) {
+              setTimeout(() => attemptConnect(retriesLeft - 1), 1000);
+            }
           });
         }
       } catch (e) {
-        //side_toaster("Connection could not be established", 5000);
+        if (retriesLeft > 0) {
+          setTimeout(() => attemptConnect(retriesLeft - 1), 1000);
+        }
       }
     };
 
-    if (peer && peer.open) {
-      attemptConnect();
-    } else {
-      setTimeout(attemptConnect, 500);
-    }
+    attemptConnect();
   }
 };
 
@@ -5042,6 +5084,18 @@ let page_counter = 0;
 var chat = {
   oninit: () => {
     key_delay();
+
+    const routePeer = m.route.param("peer");
+    if (routePeer) {
+      status.current_user_id = routePeer;
+      if (!status.current_user_name) {
+        status.current_user_name = routePeer;
+      }
+      if (!status.current_user_nickname) {
+        status.current_user_nickname = routePeer;
+      }
+    }
+
     load_chat_data(status.current_user_id);
     status.action = "";
     status.audio_recording = false;
