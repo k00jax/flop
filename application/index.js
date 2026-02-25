@@ -325,10 +325,11 @@ let compareUserList = (userlist) => {
   userlist.forEach((user) => {
     if (!connectedPeers.includes(user)) {
       try {
-        peer.connect(user, {
+        const conn = peer.connect(user, {
           label: "flop",
           reliable: true,
         });
+        registerConnection(conn, { incoming: false });
       } catch (e) {
         console.log("try to connect failed" + e);
       }
@@ -551,13 +552,115 @@ let load_chat_data = (id) => {
 //track connections
 
 let restrict_same_id = [];
-function setupConnectionEvents(conn) {
+function ensureAddressbookEntry(peerId, nickname = "") {
+  if (!peerId) {
+    return null;
+  }
+
+  let existing = addressbook.find((entry) => entry.id === peerId);
+  if (existing) {
+    return existing;
+  }
+
+  const displayName = (nickname || peerId).trim();
+  existing = {
+    id: peerId,
+    nickname: displayName,
+    name: displayName,
+    client_id: "null",
+    live: true,
+  };
+
+  addressbook.push(existing);
+
+  if (status.notKaiOS) {
+    upsertPeer(peerId, {
+      nickname: displayName,
+      lastSeen: Date.now(),
+    });
+  }
+
+  localforage.setItem("addressbook", addressbook).catch(() => {});
+  return existing;
+}
+
+function normalizeInboundData(rawData, conn) {
+  let data = rawData;
+
+  if (!data || typeof data !== "object") {
+    data = {
+      type: "text",
+      payload: {
+        text: String(rawData ?? ""),
+      },
+    };
+  }
+
+  if (!data.from) data.from = conn.peer;
+  if (!data.to) data.to = settings.custom_peer_id;
+  if (!data.id) data.id = uuidv4(16);
+  if (!data.datetime) data.datetime = new Date();
+  if (!data.type) {
+    if (typeof data.text === "string") {
+      data.payload = { text: data.text };
+    } else if (typeof data.message === "string") {
+      data.payload = { text: data.message };
+    }
+    data.type = "text";
+  }
+  if (!data.nickname) {
+    data.nickname =
+      status.current_user_name || status.current_user_nickname || data.from;
+  }
+
+  if (typeof data.payload === "string") {
+    data.payload = { text: data.payload };
+  }
+
+  if (!data.payload || typeof data.payload !== "object") {
+    data.payload = {};
+  }
+
+  if (
+    data.type === "text" &&
+    typeof data.payload.text !== "string" &&
+    typeof data.message === "string"
+  ) {
+    data.payload.text = data.message;
+  }
+
+  return data;
+}
+
+function registerConnection(conn, options = {}) {
+  if (!conn || conn.__flopRegistered) {
+    return;
+  }
+
+  conn.__flopRegistered = true;
+  const incoming = Boolean(options.incoming);
+
   connectedPeersObject.push(conn);
   if (!connectedPeers.includes(conn.peer)) connectedPeers.push(conn.peer);
+  updateConnections();
+
+  ensureAddressbookEntry(conn.peer, conn.peer);
+  upsertWebPeer(conn.peer, conn.peer);
+
+  if (incoming) {
+    console.log("[INBOUND] connection from", conn.peer);
+    side_toaster("Incoming chat from " + conn.peer, 2500);
+    status.current_user_id = conn.peer;
+    status.current_user_nickname = conn.peer;
+    if (m.route.get().startsWith("/start") || m.route.get().startsWith("/intro")) {
+      m.route.set("/chat?id=" + settings.custom_peer_id + "&peer=" + conn.peer);
+    }
+  }
 
   let pc = conn.peerConnection;
 
-  pc.addEventListener("iceconnectionstatechange", () => {
+  if (pc) {
+    pc.addEventListener("iceconnectionstatechange", () => {
     console.log(pc.iceConnectionState);
 
     switch (pc.iceConnectionState) {
@@ -640,16 +743,23 @@ function setupConnectionEvents(conn) {
         break;
     }
   });
+  }
 
   //////////////
   //receive data
   //////////////
 
   conn.on("data", function (data) {
-    //block is not from flop app
-    if (conn.label !== "flop") return;
+    if (conn.label && conn.label !== "flop") {
+      console.log("[INBOUND DATA LABEL]", conn.label, conn.peer);
+    }
+
+    data = normalizeInboundData(data, conn);
+
+    console.log("[INBOUND DATA]", conn.peer, data);
 
     upsertWebPeer(data.from, data.nickname || "");
+    ensureAddressbookEntry(data.from, data.nickname || conn.peer);
 
     tryConnect(data);
 
@@ -756,28 +866,18 @@ function setupConnectionEvents(conn) {
       //is in addressbook - notify
       let inAddressbook = addressbook.find((e) => e.id === data.from);
       if (!inAddressbook) {
-        if (status.communicationRequest.includes(data.from)) return;
-        setTimeout(() => {
-          let ask = confirm("Do you want to chat with " + data.nickname + "?");
-          if (ask) {
-            status.current_user_id = data.from;
-            status.current_user_name = "";
-            status.action = "dialog";
+        inAddressbook = ensureAddressbookEntry(data.from, data.nickname || "");
+        status.current_user_id = data.from;
+        status.current_user_name = "";
+        status.current_user_nickname = data.nickname || data.from;
+        side_toaster("Incoming chat from " + (inAddressbook?.name || data.from), 2500);
 
-            addUserToAddressBook(status.current_user_id, data.nickname);
-
-            m.route.set(
-              "/chat?id=" +
-                settings.custom_peer_id +
-                "&peer=" +
-                status.current_user_id,
-            );
-          } else {
-            //prevent to ask multiple times in the session
-            status.communicationRequest.push(data.from);
-            conn.close();
-          }
-        }, 100);
+        let route = m.route.get();
+        if (route.startsWith("/start") || route.startsWith("/intro")) {
+          m.route.set(
+            "/chat?id=" + settings.custom_peer_id + "&peer=" + status.current_user_id,
+          );
+        }
       } else {
         const now = Date.now();
 
@@ -1045,6 +1145,10 @@ function updateConnections() {
   status.userOnline = connectedPeers.length;
 }
 
+function setupConnectionEvents(conn) {
+  registerConnection(conn, { incoming: false });
+}
+
 let ice_servers = {
   "iceServers": [...rtcDefaults.iceServers],
 };
@@ -1146,18 +1250,20 @@ async function getIceServers() {
     //connection from remote peer
     //dosent work in KaiOS 2.x
     peer.on("connection", function (conn) {
-      console.log("Hello remote " + conn.peer);
-      setupConnectionEvents(conn);
+      console.log("[INBOUND] connection from", conn.peer);
+      registerConnection(conn, { incoming: true });
 
       const pc = conn.peerConnection;
-      pc.addEventListener("icecandidate", (event) => {
-        if (event.candidate) {
-          if (event.candidate.type === "relay") {
-            console.log("TURN");
-            console.log("Server:", event.candidate.candidate);
+      if (pc) {
+        pc.addEventListener("icecandidate", (event) => {
+          if (event.candidate) {
+            if (event.candidate.type === "relay") {
+              console.log("TURN");
+              console.log("Server:", event.candidate.candidate);
+            }
           }
-        }
-      });
+        });
+      }
     });
 
     peer.on("error", function (err) {
@@ -2131,11 +2237,12 @@ let peer_is_online = async function () {
         });
 
         if (tempConn) {
+          registerConnection(tempConn, { incoming: false });
+
           tempConn.on("open", () => {
             console.log(entry.id + " connected");
 
             entry.live = true;
-            setupConnectionEvents(tempConn);
             m.redraw();
           });
 
@@ -2232,6 +2339,8 @@ let connect_to_peer = function (
         }
 
         if (conn) {
+          registerConnection(conn, { incoming: false });
+
           const timeout = setTimeout(() => {
             if (!conn.open) {
               console.log("can't connect");
@@ -2245,7 +2354,6 @@ let connect_to_peer = function (
 
           conn.on("open", () => {
             clearTimeout(timeout);
-            setupConnectionEvents(conn);
           });
 
           conn.on("error", (err) => {

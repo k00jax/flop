@@ -6,6 +6,139 @@ import { status, settings } from "../../index.js";
 
 import localforage from "localforage";
 
+const BAR_ICON_URLS = Object.freeze({
+  "audio.png": new URL("../image/audio.png", import.meta.url).href,
+  "back.svg": new URL("../image/back.svg", import.meta.url).href,
+  "cancel.svg": new URL("../image/cancel.svg", import.meta.url).href,
+  "delete.svg": new URL("../image/delete.svg", import.meta.url).href,
+  "git.png": new URL("../image/git.png", import.meta.url).href,
+  "image.svg": new URL("../image/image.svg", import.meta.url).href,
+  "invite.svg": new URL("../image/invite.svg", import.meta.url).href,
+  "liberapay.svg": new URL("../image/liberapay.svg", import.meta.url).href,
+  "link.svg": new URL("../image/link.svg", import.meta.url).href,
+  "logo-style.svg": new URL("../image/logo-style.svg", import.meta.url).href,
+  "map.svg": new URL("../image/map.svg", import.meta.url).href,
+  "marker.svg": new URL("../image/marker.svg", import.meta.url).href,
+  "minus.svg": new URL("../image/minus.svg", import.meta.url).href,
+  "offline.svg": new URL("../image/offline.svg", import.meta.url).href,
+  "ok.svg": new URL("../image/ok.svg", import.meta.url).href,
+  "option.svg": new URL("../image/option.svg", import.meta.url).href,
+  "pause.svg": new URL("../image/pause.svg", import.meta.url).href,
+  "pencil.svg": new URL("../image/pencil.svg", import.meta.url).href,
+  "person.svg": new URL("../image/person.svg", import.meta.url).href,
+  "play.svg": new URL("../image/play.svg", import.meta.url).href,
+  "plus.svg": new URL("../image/plus.svg", import.meta.url).href,
+  "qr.svg": new URL("../image/qr.svg", import.meta.url).href,
+  "record.svg": new URL("../image/record.svg", import.meta.url).href,
+  "save.svg": new URL("../image/save.svg", import.meta.url).href,
+  "send.svg": new URL("../image/send.svg", import.meta.url).href,
+  "settings.svg": new URL("../image/settings.svg", import.meta.url).href,
+});
+
+function resolveKnownImageSrc(rawSrc = "") {
+  const cleaned = String(rawSrc).trim().split("?")[0].split("#")[0];
+  const fileName = cleaned.split("/").pop();
+  if (!fileName) {
+    return "";
+  }
+
+  return BAR_ICON_URLS[fileName] || "";
+}
+
+function rewriteKnownImageSources(root = document) {
+  if (!root || !root.querySelectorAll) {
+    return;
+  }
+
+  root.querySelectorAll("img").forEach((img) => {
+    const rawSrc = img.getAttribute("src") || "";
+    const resolved = resolveKnownImageSrc(rawSrc);
+    if (!resolved) {
+      return;
+    }
+    if (img.getAttribute("src") !== resolved) {
+      img.setAttribute("src", resolved);
+    }
+  });
+}
+
+function startImageRewriteObserver() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (window.__flopImageRewriteObserverStarted) {
+    return;
+  }
+
+  window.__flopImageRewriteObserverStarted = true;
+
+  const start = () => {
+    rewriteKnownImageSources(document);
+
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === "attributes" && mutation.target?.tagName === "IMG") {
+          rewriteKnownImageSources(mutation.target.parentNode || document);
+          continue;
+        }
+
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType !== 1) {
+            return;
+          }
+
+          if (node.tagName === "IMG") {
+            rewriteKnownImageSources(node.parentNode || document);
+          } else if (node.querySelectorAll) {
+            rewriteKnownImageSources(node);
+          }
+        });
+      }
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["src"],
+    });
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start, { once: true });
+  } else {
+    start();
+  }
+}
+
+startImageRewriteObserver();
+
+function resolveBarHtml(html) {
+  if (!html || typeof html !== "string") {
+    return html || "";
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = html;
+
+  wrapper.querySelectorAll("img").forEach((img) => {
+    const rawSrc = (img.getAttribute("src") || "").trim();
+    if (!rawSrc) {
+      return;
+    }
+
+    const cleaned = rawSrc.split("?")[0].split("#")[0];
+    const fileName = cleaned.split("/").pop();
+
+    if (fileName && BAR_ICON_URLS[fileName]) {
+      img.setAttribute("src", BAR_ICON_URLS[fileName]);
+    }
+  });
+
+  return wrapper.innerHTML;
+}
+
 export let info_badge = (show) => {
   let badge = document.getElementById("info-badge");
   show ? badge.classList.add("show") : badge.classList.remove("show");
@@ -581,9 +714,12 @@ let toast_qq = function (text, time) {
 
 //bottom bar
 export let bottom_bar = function (left, center, right) {
-  document.querySelector("div#bottom-bar div.button-left").innerHTML = left;
-  document.querySelector("div#bottom-bar div.button-center").innerHTML = center;
-  document.querySelector("div#bottom-bar div.button-right").innerHTML = right;
+  document.querySelector("div#bottom-bar div.button-left").innerHTML =
+    resolveBarHtml(left);
+  document.querySelector("div#bottom-bar div.button-center").innerHTML =
+    resolveBarHtml(center);
+  document.querySelector("div#bottom-bar div.button-right").innerHTML =
+    resolveBarHtml(right);
 
   if (left == "" && center == "" && right == "") {
     document.querySelector("div#bottom-bar").style.display = "none";
@@ -594,9 +730,12 @@ export let bottom_bar = function (left, center, right) {
 
 //top bar
 export let top_bar = function (left, center, right) {
-  document.querySelector("div#top-bar div.button-left").innerHTML = left;
-  document.querySelector("div#top-bar div.button-center").innerHTML = center;
-  document.querySelector("div#top-bar div.button-right").innerHTML = right;
+  document.querySelector("div#top-bar div.button-left").innerHTML =
+    resolveBarHtml(left);
+  document.querySelector("div#top-bar div.button-center").innerHTML =
+    resolveBarHtml(center);
+  document.querySelector("div#top-bar div.button-right").innerHTML =
+    resolveBarHtml(right);
   if (left == "" && center == "" && right == "") {
     document.querySelector("div#top-bar").style.display = "none";
   } else {
