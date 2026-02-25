@@ -138,6 +138,74 @@ article img {
   cursor: pointer;
 }
 
+#desktop-top-controls {
+  display: none;
+}
+
+#message-input textarea {
+  width: 100%;
+  min-height: 54px;
+  padding: 10px;
+  border: 2px solid #d0d0d0;
+  border-radius: 8px;
+  font-family: "Roboto" !important;
+  font-size: 1rem;
+  resize: vertical;
+}
+
+@media (min-width: 900px) {
+  .desktop-web #wrapper {
+    max-width: 1400px;
+  }
+
+  .desktop-web #desktop-top-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    margin: 6px 0 10px 0;
+    border: 1px solid #cfcfcf;
+    border-radius: 10px;
+    background: #f8f8f8;
+  }
+
+  .desktop-web #desktop-top-controls .desktop-status {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .desktop-web #desktop-top-controls .desktop-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+
+  .desktop-web #desktop-top-controls button.desktop-action-btn {
+    width: auto;
+    margin: 0;
+    padding: 6px 10px;
+    border-radius: 8px;
+  }
+
+  .desktop-web #chat {
+    height: calc(100vh - 190px);
+    overflow-y: auto;
+    padding-top: 8px;
+  }
+
+  .desktop-web #message-input {
+    position: sticky;
+    bottom: 0;
+    background: #fff;
+    padding: 8px 0;
+    z-index: 4;
+  }
+}
+
 #toolbar #toolbar-bottom {
   position: absolute;
   bottom: 60px;

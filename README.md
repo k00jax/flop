@@ -252,6 +252,76 @@ Build KaiOS 2 app<br>
 If you want to create a browser version<br>
 `npm run web`
 
+Run browser version in dev mode<br>
+`npm run web:dev`
+
+Build browser companion bundle<br>
+`npm run web:build`
+
+## Desktop companion (web)
+
+The web build now supports desktop-first chat usage without changing KaiOS behavior:
+
+- persistent peerId in `localStorage` (`flopPeerId`)
+- desktop control bar (Show QR / Scan QR / Connect / Reset identity)
+- peer list persistence in `localStorage` (`flopPeers`)
+- auto reconnect to the most recently active peer (best effort)
+- per-peer message history in `localStorage` (`flopMessages_<peerId>`)
+- centralized signaling + ICE config in `application/config/rtcConfig.js`
+
+### Pairing
+
+- Show your QR from `Invite` or desktop `Show QR`
+- Scan from `Scan QR` (camera)
+- Manual fallback: desktop `Connect` button accepts either `peerId` or invite URL
+
+### Environment for signaling / TURN (web + bridge)
+
+Create `.env` at project root (example):
+
+```env
+PEER_HOST=0.peerjs.com
+PEER_PORT=443
+PEER_PATH=/
+PEER_SECURE=true
+
+TURN_URL=turn:example.org:3478
+TURN_USER=myuser
+TURN_PASS=mypass
+```
+
+## Optional Discord bridge
+
+Folder: `bridge/discord/`
+
+Run:
+
+`npm run bridge:discord`
+
+Required env:
+
+```env
+DISCORD_BOT_TOKEN=...
+DISCORD_GUILD_ID=...
+DISCORD_OWNER_USER_ID=...
+DISCORD_CATEGORY_NAME=Text messages
+
+# Optional fixed peer ID for bridge account
+FLOP_BRIDGE_PEER_ID=flop-bridge-main
+```
+
+Behavior:
+
+- creates/uses one channel per peer under category `Text messages`
+- stores mapping in `bridge/discord/peerMap.json`
+- only `DISCORD_OWNER_USER_ID` can send outbound Discord → Flop messages
+
+### Troubleshooting
+
+- If peers cannot connect across networks, configure a TURN server via env.
+- KaiOS network constraints may require local/http test setups for some scenarios.
+- If camera scan fails on desktop, use manual connect and paste peerId/invite URL.
+
 ### TURN-SERVER
 
 To establish a connection, a TURN SERVER is usually required. This server does not store any chat data but only forwards it. The default server used is https://www.metered.ca/tools/openrelay/, which offers a free plan and is very reliable. The access data should be stored in an .env file.

@@ -21,11 +21,25 @@ import {
 } from "./assets/js/helper.js";
 import { stop_scan, start_scan } from "./assets/js/scan.js";
 import localforage from "localforage";
+import { getRtcConfig } from "./config/rtcConfig.js";
+import { getOrCreatePeerId, clearPeerId } from "./storage/identity.js";
+import {
+  getPeers,
+  getMostRecentPeer,
+  renamePeer,
+  removePeer,
+  upsertPeer,
+} from "./storage/peerStore.js";
+import { appendMessage, getMessages } from "./storage/messageStore.js";
+import {
+  createPairingQrDataUrl,
+  openManualPeerPrompt,
+  parsePairingValue,
+} from "./components/qrPairing.js";
 
 import * as linkify from "linkifyjs";
 import { geolocation, pushLocalNotification } from "./assets/js/helper.js";
 import m, { censor } from "mithril";
-import qrious from "qrious";
 import { v4 as uuidv4 } from "uuid";
 import L from "leaflet";
 import dayjs from "dayjs";
@@ -164,10 +178,70 @@ if (!status.notKaiOS) {
 let links = "";
 let chat_data = [];
 let peer = null;
+const rtcDefaults = getRtcConfig();
 
 let conn = "";
 let connectedPeers = [];
 let connectedPeersObject = [];
+
+function persistWebMessage(peerId, dir, type, payload, id = "", from = "", to = "") {
+  if (!status.notKaiOS || !peerId) return;
+  appendMessage(peerId, {
+    ts: Date.now(),
+    dir,
+    type,
+    payload,
+    id,
+    from,
+    to,
+  });
+}
+
+function resetWebIdentity() {
+  clearPeerId();
+  localforage
+    .getItem("settings")
+    .then((value) => {
+      const current = value || {};
+      current.custom_peer_id = getOrCreatePeerId();
+      return localforage.setItem("settings", current);
+    })
+    .finally(() => {
+      window.location.reload();
+    });
+}
+
+function mergePeerStoreIntoAddressbook() {
+  if (!status.notKaiOS) return;
+
+  const peers = getPeers();
+  if (!peers.length) return;
+
+  peers.forEach((peerItem) => {
+    const exists = addressbook.some((entry) => entry.id === peerItem.peerId);
+    if (exists) return;
+
+    addressbook.push({
+      id: peerItem.peerId,
+      nickname: peerItem.nickname || "",
+      name: peerItem.nickname || "",
+      live: false,
+      last_conversation_datetime: peerItem.lastSeen
+        ? dayjs(peerItem.lastSeen).format("HH:mm")
+        : "",
+    });
+  });
+
+  localforage.setItem("addressbook", addressbook).then(() => {});
+}
+
+function upsertWebPeer(peerId, nickname = "") {
+  if (!status.notKaiOS || !peerId) return;
+  upsertPeer(peerId, {
+    nickname,
+    lastSeen: Date.now(),
+  });
+}
 
 if (status.debug) {
   window.onerror = function (msg, url, linenumber) {
@@ -317,8 +391,11 @@ localforage
 
         clean_chat_data();
       }
+
+      mergePeerStoreIntoAddressbook();
     } else {
       addressbook = [];
+      mergePeerStoreIntoAddressbook();
     }
   })
   .catch(() => {});
@@ -326,6 +403,9 @@ localforage
 let delete_addressbook_item = (userIdToDelete) => {
   // Filter out the user with the specified id
   addressbook = addressbook.filter((user) => user.id !== userIdToDelete);
+  if (status.notKaiOS) {
+    removePeer(userIdToDelete);
+  }
 
   localforage
     .setItem("addressbook", addressbook)
@@ -359,6 +439,9 @@ let update_addressbook_item = (userIdToUpdate) => {
 
   if (newName !== null && newName.trim() !== "") {
     addressbook[userIndex].name = newName.trim();
+    if (status.notKaiOS) {
+      renamePeer(userIdToUpdate, newName.trim());
+    }
   }
 
   // Save the updated addressbook to localforage
@@ -394,6 +477,10 @@ let addUserToAddressBook = (a, b = "", c = "") => {
     live: false,
   });
 
+  if (status.notKaiOS) {
+    upsertWebPeer(a, b || uname);
+  }
+
   localforage
     .setItem("addressbook", addressbook)
     .then((e) => {
@@ -427,6 +514,28 @@ function tryConnect(data) {
 //reproduce chatHistory
 
 let load_chat_data = (id) => {
+  if (status.notKaiOS) {
+    const storedMessages = getMessages(id, 250);
+    if (storedMessages.length > 0) {
+      chat_data = storedMessages.map((entry) => {
+        const outgoing = entry.dir === "out";
+        return {
+          id: entry.id || uuidv4(16),
+          nickname: outgoing
+            ? settings.nickname
+            : status.current_user_name || status.current_user_nickname || id,
+          datetime: new Date(entry.ts || Date.now()),
+          payload: entry.payload || {},
+          type: entry.type || "text",
+          from: outgoing ? settings.custom_peer_id : id,
+          to: outgoing ? id : settings.custom_peer_id,
+          pod: false,
+        };
+      });
+      return;
+    }
+  }
+
   let c = chat_data_history.filter((e) => {
     return (
       (e.from === settings.custom_peer_id && e.to === id) ||
@@ -537,6 +646,8 @@ function setupConnectionEvents(conn) {
   conn.on("data", function (data) {
     //block is not from flop app
     if (conn.label !== "flop") return;
+
+    upsertWebPeer(data.from, data.nickname || "");
 
     tryConnect(data);
 
@@ -875,6 +986,16 @@ function setupConnectionEvents(conn) {
       }
       restrict_same_id.push(data.id);
 
+      persistWebMessage(
+        data.from,
+        "in",
+        data.type,
+        data.payload || {},
+        data.id,
+        data.from,
+        data.to,
+      );
+
       storeChatData().then(() => {
         m.redraw();
       });
@@ -923,7 +1044,7 @@ function updateConnections() {
 }
 
 let ice_servers = {
-  "iceServers": [],
+  "iceServers": [...rtcDefaults.iceServers],
 };
 
 //load ICE Server
@@ -936,26 +1057,33 @@ async function getIceServers() {
 
   let p = m.route.get();
 
-  try {
-    const response = await fetch(
-      "https://" +
-        process.env.TURN_APP_NAME +
-        ".metered.live/api/v1/turn/credentials?apiKey=" +
-        process.env.TURN_APP_KEY,
-    );
+  const rtcConfig = getRtcConfig();
+  ice_servers.iceServers = [...rtcConfig.iceServers];
 
-    if (!response.ok) {
+  try {
+    let response = null;
+
+    if (process.env.TURN_APP_NAME && process.env.TURN_APP_KEY) {
+      response = await fetch(
+        "https://" +
+          process.env.TURN_APP_NAME +
+          ".metered.live/api/v1/turn/credentials?apiKey=" +
+          process.env.TURN_APP_KEY,
+      );
+    }
+
+    if (response && !response.ok) {
       side_toaster("Server not reachable", 5000);
       //retry get turn
       getIceServers();
       if (p.startsWith("/start"))
         top_bar("", "<img src='assets/image/offline.svg'>", "");
     }
-    if (response.ok) {
+    if (response && response.ok) {
       if (p.startsWith("/start")) top_bar("", "", "");
     }
 
-    const a = await response.json();
+    const a = response ? await response.json() : [];
 
     a.forEach((credential) => {
       if (
@@ -980,9 +1108,12 @@ async function getIceServers() {
 
     peer = new Peer(settings.custom_peer_id, {
       debug: 0,
-      host: settings.server_url,
-      path: settings.server_path,
-      secure: true,
+      host: status.notKaiOS ? rtcConfig.peer.host : settings.server_url,
+      path: status.notKaiOS ? rtcConfig.peer.path : settings.server_path,
+      port: status.notKaiOS
+        ? rtcConfig.peer.port
+        : Number(settings.server_port || 443),
+      secure: status.notKaiOS ? rtcConfig.peer.secure : true,
       config: ice_servers,
       iceTransportPolicy: "all",
       iceCandidatePoolSize: 3,
@@ -1144,7 +1275,9 @@ localforage
       server_path: "/peerjs",
       server_port: "443",
       invite_url: "https://flop.chat/",
-      custom_peer_id: "flop-" + uuidv4(16),
+      custom_peer_id: status.notKaiOS
+        ? getOrCreatePeerId()
+        : "flop-" + uuidv4(16),
       unique_id: "flop-" + uuidv4(16),
     };
 
@@ -1164,6 +1297,11 @@ localforage
 
     if (!settings.unique_id) {
       settings.unique_id = "flop-" + uuidv4(16);
+      localforage.setItem("settings", settings).then(() => {});
+    }
+
+    if (status.notKaiOS) {
+      settings.custom_peer_id = getOrCreatePeerId();
       localforage.setItem("settings", settings).then(() => {});
     }
 
@@ -1193,6 +1331,61 @@ let write = () => {
   status.action = status.action === "write" ? "" : "write";
   m.redraw();
 };
+
+function manualConnect() {
+  const peerId = openManualPeerPrompt();
+  if (!peerId) return;
+  connect_to_peer(peerId);
+}
+
+function desktopTopControls() {
+  if (!status.notKaiOS) return null;
+
+  return m("div", { id: "desktop-top-controls", class: "only-desktop" }, [
+    m("div", { class: "desktop-status" }, [
+      m("strong", "Connected: " + connectedPeers.length),
+      m("small", "My peerId: " + settings.custom_peer_id),
+    ]),
+    m("div", { class: "desktop-actions" }, [
+      m(
+        "button",
+        {
+          class: "desktop-action-btn",
+          onclick: () => {
+            m.route.set("/invite");
+          },
+        },
+        "Show QR",
+      ),
+      m(
+        "button",
+        {
+          class: "desktop-action-btn",
+          onclick: () => {
+            m.route.set("/scan");
+          },
+        },
+        "Scan QR",
+      ),
+      m(
+        "button",
+        {
+          class: "desktop-action-btn",
+          onclick: manualConnect,
+        },
+        "Connect",
+      ),
+      m(
+        "button",
+        {
+          class: "desktop-action-btn",
+          onclick: resetWebIdentity,
+        },
+        "Reset identity",
+      ),
+    ]),
+  ]);
+}
 
 //list files
 if (!status.notKaiOS) {
@@ -1322,6 +1515,20 @@ let sendMessage = (
         pod: false,
       });
 
+      persistWebMessage(
+        to,
+        "out",
+        type,
+        {
+          image: reader.result,
+          filename: msg.filename,
+          mimeType: mimeType,
+        },
+        messageId,
+        settings.custom_peer_id,
+        to,
+      );
+
       message = {
         nickname: settings.nickname,
         type: type,
@@ -1358,6 +1565,20 @@ let sendMessage = (
       id: messageId,
       pod: false,
     });
+
+    persistWebMessage(
+      to,
+      "out",
+      type,
+      {
+        audio: "blob",
+        filename: messageId + ".mp3",
+        mimeType: mimeType,
+      },
+      messageId,
+      settings.custom_peer_id,
+      to,
+    );
 
     focus_last_article();
 
@@ -1403,10 +1624,24 @@ let sendMessage = (
       pod: false,
     });
 
+    persistWebMessage(
+      to,
+      "out",
+      type,
+      { text: msg },
+      messageId,
+      settings.custom_peer_id,
+      to,
+    );
+
     sendMessageToAll(message);
 
     focus_last_article();
-    write();
+    if (!status.notKaiOS) {
+      write();
+    } else {
+      status.action = "write";
+    }
   }
 
   //contact
@@ -1431,10 +1666,24 @@ let sendMessage = (
       pod: false,
     });
 
+    persistWebMessage(
+      to,
+      "out",
+      type,
+      { id: contact.id, name: contact.name },
+      messageId,
+      settings.custom_peer_id,
+      to,
+    );
+
     sendMessageToAll(message);
 
     focus_last_article();
-    write();
+    if (!status.notKaiOS) {
+      write();
+    } else {
+      status.action = "write";
+    }
   }
 
   //live gps
@@ -1458,6 +1707,19 @@ let sendMessage = (
         id: messageId,
         pod: false,
       });
+
+      persistWebMessage(
+        to,
+        "out",
+        type,
+        {
+          lat: gps.lat,
+          lng: gps.lng,
+        },
+        messageId,
+        settings.custom_peer_id,
+        to,
+      );
 
       status.geolocation_last_autoupdate_id = messageId;
     }
@@ -1493,6 +1755,19 @@ let sendMessage = (
       id: messageId,
       pod: false,
     });
+
+    persistWebMessage(
+      to,
+      "out",
+      type,
+      {
+        lat: gps.lat,
+        lng: gps.lng,
+      },
+      messageId,
+      settings.custom_peer_id,
+      to,
+    );
 
     message = {
       nickname: settings.nickname,
@@ -1794,7 +2069,9 @@ let peer_is_online = async function () {
         let user_meta = {
           "history_of_ids": status.history_of_ids,
           "unique_id": settings.unique_id,
-          "signaling_server_url": settings.server_url,
+          "signaling_server_url": status.notKaiOS
+            ? getRtcConfig().peer.host
+            : settings.server_url,
         };
         let tempConn = peer.connect(entry.id, {
           label: "flop",
@@ -1858,6 +2135,8 @@ let connect_to_peer = function (
     status.current_user_nickname = nickname || generateRandomString(10);
   }
 
+  upsertWebPeer(id, status.current_user_name || status.current_user_nickname);
+
   chat_data = [];
 
   const openConn = connectedPeersObject.find((c) => c.peer === id && c.open);
@@ -1880,7 +2159,9 @@ let connect_to_peer = function (
         let user_meta = {
           "history_of_ids": status.history_of_ids,
           "unique_id": settings.unique_id,
-          "signaling_server_url": settings.server_url,
+          "signaling_server_url": status.notKaiOS
+            ? getRtcConfig().peer.host
+            : settings.server_url,
         };
         let conn = peer.connect(id, {
           label: "flop",
@@ -1935,18 +2216,14 @@ let connect_to_peer = function (
 //create room
 // and create qr-code with peer id
 let generate_contact = function () {
-  //create qr code
-  var qrs = new qrious();
-  qrs.set({
-    background: "white",
-    foreground: "black",
-    level: "H",
-    padding: 5,
-    size: 1000,
-    value: settings.invite_url + "#!/intro?id=" + settings.custom_peer_id,
-  });
-
-  status.invite_qr = qrs.toDataURL();
+  createPairingQrDataUrl(settings.custom_peer_id)
+    .then((qrDataUrl) => {
+      status.invite_qr = qrDataUrl;
+      m.redraw();
+    })
+    .catch(() => {
+      status.invite_qr = "";
+    });
 };
 
 let only_once = false;
@@ -1968,9 +2245,14 @@ let scan_callback = function (n) {
     alert("QR is not valid");
     m.route.set("/start");
   } else {
-    let m = n.split("id=");
+    const peerId = parsePairingValue(n);
     status.action = "";
-    connect_to_peer(m[1]);
+    if (!peerId) {
+      alert("QR is not valid");
+      m.route.set("/start");
+      return;
+    }
+    connect_to_peer(peerId);
   }
 };
 
@@ -2915,6 +3197,7 @@ var about_page = {
         },
       },
       [
+        desktopTopControls(),
         m(
           "div",
           { class: "scroll", id: "about-text" },
@@ -3771,8 +4054,9 @@ var intro = {
 
           // URL-Logik
           const fullUrl = window.location.href;
+          const peerFromUrl = parsePairingValue(fullUrl);
 
-          if (fullUrl.includes("?id=")) {
+          if (peerFromUrl) {
             localforage.setItem("connect_to_id", { data: fullUrl });
             status.launching = true;
 
@@ -3780,8 +4064,7 @@ var intro = {
               app_launcher();
             } else {
               setTimeout(() => {
-                let m = fullUrl.split("id=");
-                connect_to_peer(m[1]);
+                connect_to_peer(peerFromUrl);
               }, 1000);
             }
           } else {
@@ -3795,9 +4078,8 @@ var intro = {
             .getItem("connect_to_id")
             .then((e) => {
               if (e && e.data) {
-                let params = e.data.split("?id=");
-                if (params.length > 1) {
-                  let id = params[1];
+                const id = parsePairingValue(e.data);
+                if (id) {
                   localforage.removeItem("connect_to_id").then(() => {
                     connect_to_peer(id);
                   });
@@ -3861,6 +4143,15 @@ var start = {
     setTimeout(() => {
       peer_is_online();
     }, 4000);
+
+    if (status.notKaiOS) {
+      setTimeout(() => {
+        const mostRecent = getMostRecentPeer();
+        if (mostRecent && mostRecent.peerId) {
+          connect_to_peer(mostRecent.peerId, mostRecent.nickname || "", false);
+        }
+      }, 2500);
+    }
   },
   onremove: () => {
     status.viewReady = false;
@@ -4450,6 +4741,7 @@ var chat = {
           if (status.notKaiOS) {
             m.mount(document.getElementById("toolbar"), Toolbar);
             m.mount(document.getElementById("sidebar"), addressbook_comp);
+            status.action = "write";
           }
 
           //try to send old messages
@@ -4519,9 +4811,16 @@ var chat = {
               console.log("user check not possible");
             }
           }, 2000);
+
+          if (status.notKaiOS) {
+            setTimeout(() => {
+              const input = document.querySelector("#message-input textarea");
+              if (input) input.focus();
+            }, 150);
+          }
         },
       },
-
+      desktopTopControls(),
       status.action === "write"
         ? m(
             "div",
@@ -4529,8 +4828,9 @@ var chat = {
               id: "message-input",
             },
             [
-              m("input", {
-                type: "text",
+              m("textarea", {
+                rows: 2,
+                placeholder: "Type a message",
 
                 oncreate: (vnode) => {
                   setTimeout(function () {
@@ -4579,6 +4879,25 @@ var chat = {
                     "",
                     "<img src='assets/image/option.svg'>",
                   );
+                },
+                onkeydown: (e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    const value = e.target.value.trim();
+                    if (!value) return;
+                    sendMessage(value, "text", undefined, status.current_user_id);
+                    e.target.value = "";
+
+                    if (status.notKaiOS) {
+                      status.action = "write";
+                      setTimeout(() => {
+                        const input = document.querySelector(
+                          "#message-input textarea",
+                        );
+                        if (input) input.focus();
+                      }, 0);
+                    }
+                  }
                 },
                 onkeyup: (e) => {
                   const value = e.target.value.trim();
@@ -5012,6 +5331,10 @@ function scrollToCenter() {
 }
 
 document.addEventListener("DOMContentLoaded", function (e) {
+  if (status.notKaiOS) {
+    document.body.classList.add("desktop-web");
+  }
+
   /////////////////
   ///NAVIGATION
   /////////////////
